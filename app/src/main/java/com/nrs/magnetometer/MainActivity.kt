@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.widget.TextView
 import kotlin.math.abs
 import kotlin.math.sqrt
+import android.content.pm.ActivityInfo   // <-- добавили
 
 class MainActivity : Activity(), SensorEventListener {
 
@@ -29,14 +30,29 @@ class MainActivity : Activity(), SensorEventListener {
     private var baselineReady = false
 
     // простые фильтры
-    private val lpAlpha = 0.10f   // сглаживание показаний
-    private val baseAlpha = 0.005f // медленный дрейф базы (долгосрочная средняя)
+    private val lpAlpha = 0.10f
+    private val baseAlpha = 0.005f
 
-    // порог «всплеска» (можно подбирать)
+    // порог «всплеска»
     private var spikeThreshold = 6f
+
+    // --- старт/прогрев ---
+    private var warmupSamples = 20
+    private var warmupLeft = warmupSamples
+    private var warmupSum = 0f
+    private var filterInited = false
+
+    // --- антиспам и отражение X ---
+    private var lastPulseTime = 0L
+    private val minPulseIntervalMs = 350L
+    private var flipX = -1f
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Фиксируем портретную ориентацию
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+
         setContentView(R.layout.activity_main)
 
         planeView = findViewById(R.id.planeView)
@@ -64,41 +80,58 @@ class MainActivity : Activity(), SensorEventListener {
     override fun onSensorChanged(event: SensorEvent) {
         if (event.sensor.type != Sensor.TYPE_MAGNETIC_FIELD) return
 
-        // Низкочастотный фильтр (сгладим шум)
-        magX += lpAlpha * (event.values[0] - magX)
-        magY += lpAlpha * (event.values[1] - magY)
-        magZ += lpAlpha * (event.values[2] - magZ)
+        val rx = event.values[0]
+        val ry = event.values[1]
+        val rz = event.values[2]
 
-        val mag = sqrt(magX*magX + magY*magY + magZ*magZ) // модуль в μT
-
-        if (!baselineReady) {
-            baseline = mag
-            baselineReady = true
+        if (!filterInited) {
+            magX = rx; magY = ry; magZ = rz
+            filterInited = true
         } else {
-            // медленное обновление базового уровня
-            baseline += baseAlpha * (mag - baseline)
+            magX += lpAlpha * (rx - magX)
+            magY += lpAlpha * (ry - magY)
+            magZ += lpAlpha * (rz - magZ)
         }
+
+        val mag = sqrt(magX*magX + magY*magY + magZ*magZ)
+
+        if (warmupLeft > 0) {
+            warmupSum += mag
+            warmupLeft--
+            if (warmupLeft == 0) {
+                baseline = warmupSum / warmupSamples
+                baselineReady = true
+            }
+            tvMag.text = "Mag: ${"%.1f".format(mag)} μT"
+            tvDelta.text = "Δ: -- μT"
+            return
+        }
+
+        val predictedDelta = mag - baseline
+        val dynamicAlpha = if (kotlin.math.abs(predictedDelta) > spikeThreshold) 0.05f else baseAlpha
+        baseline += dynamicAlpha * (mag - baseline)
 
         val delta = mag - baseline
         tvMag.text = "Mag: ${"%.1f".format(mag)} μT"
         tvDelta.text = "Δ: ${"%.1f".format(delta)} μT"
 
-        // Связь c визуализацией:
-        // 1) Покачивание плоскости (сдвиг/наклон) — от компонент поля
-        planeView.externalSwayX = (magX * 0.02f).coerceIn(-1.2f, 1.2f)  // смещение влево/вправо
-        planeView.externalTiltK = (magY * 0.006f).coerceIn(-0.25f, 0.25f) // наклон по X
-        planeView.externalBendZ = (magZ * 0.003f).coerceIn(-0.35f, 0.35f) // «прогиб» вдоль Z
+        // Визуализация (покачивания)
+        planeView.externalSwayX = (magX * 0.02f).coerceIn(-1.2f, 1.2f)
+        planeView.externalTiltK = (magY * 0.006f).coerceIn(-0.25f, 0.25f)
+        planeView.externalBendZ = (magZ * 0.003f).coerceIn(-0.35f, 0.35f)
 
-        // 2) Детектор «всплесков» — быстрые изменения выше порога
-        if (abs(delta) > spikeThreshold) {
-            // позиционируем всплеск: направление по (X,Y) → угол, а Z — от величины
-            // Для простоты: X влияет на X плоскости, Z — на глубину
+        // Всплески
+        if (kotlin.math.abs(delta) > spikeThreshold) {
             val normX = (magX / 60f).coerceIn(-1f, 1f)
             val normZ = (mag / 100f).coerceIn(0f, 1f)
-            val worldX = planeView.worldHalfWidth * normX
+
+            val worldX = planeView.worldHalfWidth * (flipX * normX)
             val worldZ = planeView.worldDepth * normZ
-            val amp = (abs(delta) / 10f).coerceIn(0.8f, 3.0f)
-            val radius = (1.2f + abs(delta) / 15f).coerceIn(1.0f, 2.5f)
+
+            val d = kotlin.math.abs(delta)
+            val amp = (1.2f + d / 6f).coerceIn(1.2f, 4.0f)
+            val radius = (0.9f + d / 22f).coerceIn(0.9f, 1.8f)
+
             planeView.addPulse(worldX, worldZ, amp, radius)
         }
     }

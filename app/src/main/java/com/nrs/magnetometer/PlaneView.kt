@@ -14,10 +14,12 @@ class PlaneView @JvmOverloads constructor(
     // --- Параметры сетки/сцены ---
     private val cols = 12
     private val rows = 10
-    val worldHalfWidth = 6f     // X: -W..W
-    val worldDepth = 18f        // Z: 0..D
-    private var camY = 3.2f
-    private var camZ = 6.0f
+
+    // Чуть компактнее по ширине, подальше камера — сетка полностью помещается в портрете
+    val worldHalfWidth = 4f     // было 6f
+    val worldDepth = 22f        // было 18f
+    private var camY = 3.0f     // было 3.2f
+    private var camZ = 12.0f    // было 6.0f
     private var focal = 900f
 
     // Высоты узлов
@@ -43,9 +45,9 @@ class PlaneView @JvmOverloads constructor(
 
     // Анимация покачивания
     private var time = 0f
-    var externalSwayX = 0f  // из магнитометра
-    var externalTiltK = 0f  // из магнитометра
-    var externalBendZ = 0f  // из магнитометра
+    var externalSwayX = 0f
+    var externalTiltK = 0f
+    var externalBendZ = 0f
     private val anim = Anim()
 
     private data class P2(val x: Float, val y: Float, val zc: Float)
@@ -73,12 +75,10 @@ class PlaneView @JvmOverloads constructor(
         stepField()
         time += dt
 
-        // плавная смесь внутренней синусоиды и внешних сигналов
         val swayInner = sin(time * 0.7f) * 0.8f
         val tiltInner = sin(time * 0.5f) * 0.12f
         val bendInner = sin(time * 0.33f) * 0.25f
 
-        // сглаженная интерполяция
         anim.swayX += 0.08f * ((swayInner + externalSwayX) - anim.swayX)
         anim.tiltK += 0.08f * ((tiltInner + externalTiltK) - anim.tiltK)
         anim.bendZ += 0.08f * ((bendInner + externalBendZ) - anim.bendZ)
@@ -122,12 +122,13 @@ class PlaneView @JvmOverloads constructor(
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        focal = h * 0.9f
+        // Чуть меньшая «фокусная», чтобы уместить сетку в портрете
+        focal = h * 0.75f   // было h * 0.9f
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        // 1) «заполняем» ячейки полутонами
+        // 1) заполнение
         for (j in 0 until rows) {
             for (i in 0 until cols) {
                 val p00 = project(gridX[i],     H[j][i],     gridZ[j])     ?: continue
@@ -174,7 +175,7 @@ class PlaneView @JvmOverloads constructor(
         }
         canvas.drawPath(gridPath, paintGrid)
 
-        // 3) «всплески» — подсветка точек выше порога
+        // 3) подсветка «пиков»
         for (j in 1 until rows) {
             for (i in 1 until cols) {
                 val h = H[j][i]
@@ -186,7 +187,7 @@ class PlaneView @JvmOverloads constructor(
         }
     }
 
-    // Простейшая перспектива + «покачивание» (сдвиг/наклон/прогиб)
+    // Простейшая перспектива + покачивание
     private fun project(x: Float, y: Float, z: Float): P2? {
         val x2 = x + anim.swayX
         val y2 = y + anim.tiltK * x + anim.bendZ * ((z - worldDepth * 0.5f) / worldDepth)
@@ -195,7 +196,9 @@ class PlaneView @JvmOverloads constructor(
         if (zc <= 0.01f) return null
 
         val cx = width * 0.5f
-        val cy = height * 0.5f + 30f
+        // Чуть ниже центр, чтобы нижняя кромка сетки не упиралась в экран
+        val cy = height * 0.5f + 10f   // было +30f
+
         val sx = cx + (focal * x2) / zc
         val sy = cy - (focal * (y2 - camY)) / zc
         return P2(sx, sy, zc)
