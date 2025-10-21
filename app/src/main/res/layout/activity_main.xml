@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <com.nrs.magnetometer.PlaneView
+        android:id="@+id/planeView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:background="#33000000"
+        android:orientation="vertical"
+        android:layout_marginTop="35dp"
+        android:padding="12dp">
+
+        <TextView
+            android:id="@+id/tvMag"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Mag: -- μT"
+            android:textColor="#CFE3FF"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/tvDelta"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Δ: -- μT"
+            android:textColor="#CFE3FF"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/tvHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="6dp"
+            android:text="Движение/приближение магнита даёт всплески"
+            android:textColor="#9BB7FF"
+            android:textSize="12sp" />
+    </LinearLayout>
+</FrameLayout>
