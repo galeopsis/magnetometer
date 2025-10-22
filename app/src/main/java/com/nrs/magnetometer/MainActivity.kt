@@ -9,7 +9,7 @@ import android.os.Bundle
 import android.widget.TextView
 import kotlin.math.abs
 import kotlin.math.sqrt
-import android.content.pm.ActivityInfo   // <-- добавили
+import android.content.pm.ActivityInfo
 
 class MainActivity : Activity(), SensorEventListener {
 
@@ -46,6 +46,12 @@ class MainActivity : Activity(), SensorEventListener {
     private var lastPulseTime = 0L
     private val minPulseIntervalMs = 350L
     private var flipX = -1f
+
+    // --- параметры устойчивой «башни» (можно подбирать) ---
+    private val sustainK = 0.02f        // коэффициент перевода избытка μT в амплитуду за кадр
+    private val sustainAmpMax = 0.12f   // ограничение амплитуды подпитки за кадр (плато ≈ amp/0.02)
+    private val sustainRadiusBase = 1.2f
+    private val sustainRadiusMin = 0.8f // при сильном поле радиус сужаем, башня выше
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -84,6 +90,7 @@ class MainActivity : Activity(), SensorEventListener {
         val ry = event.values[1]
         val rz = event.values[2]
 
+        // инициализация фильтра первым реальным значением
         if (!filterInited) {
             magX = rx; magY = ry; magZ = rz
             filterInited = true
@@ -95,6 +102,7 @@ class MainActivity : Activity(), SensorEventListener {
 
         val mag = sqrt(magX*magX + magY*magY + magZ*magZ)
 
+        // прогрев
         if (warmupLeft > 0) {
             warmupSum += mag
             warmupLeft--
@@ -107,31 +115,47 @@ class MainActivity : Activity(), SensorEventListener {
             return
         }
 
+        // динамика baseline: если поле заметно выше фона — почти «замораживаем» базу
         val predictedDelta = mag - baseline
-        val dynamicAlpha = if (kotlin.math.abs(predictedDelta) > spikeThreshold) 0.05f else baseAlpha
+        val absPred = kotlin.math.abs(predictedDelta)
+        val dynamicAlpha = when {
+            absPred > spikeThreshold * 1.2f -> 0.0f     // сильное поле — не трогаем базу
+            absPred > spikeThreshold * 0.7f -> 0.001f   // умеренно сильное — очень медленно
+            else -> baseAlpha                              // иначе обычный дрейф базы
+        }
         baseline += dynamicAlpha * (mag - baseline)
 
         val delta = mag - baseline
         tvMag.text = "Mag: ${"%.1f".format(mag)} μT"
         tvDelta.text = "Δ: ${"%.1f".format(delta)} μT"
 
-        // Визуализация (покачивания)
+        // покачивания
         planeView.externalSwayX = (magX * 0.02f).coerceIn(-1.2f, 1.2f)
         planeView.externalTiltK = (magY * 0.006f).coerceIn(-0.25f, 0.25f)
         planeView.externalBendZ = (magZ * 0.003f).coerceIn(-0.35f, 0.35f)
 
-        // Всплески
-        if (kotlin.math.abs(delta) > spikeThreshold) {
-            val normX = (magX / 60f).coerceIn(-1f, 1f)
-            val normZ = (mag / 100f).coerceIn(0f, 1f)
+        // позиционирование всплеска по X/Z
+        val normX = (magX / 60f).coerceIn(-1f, 1f)
+        val normZ = (mag / 100f).coerceIn(0f, 1f)
+        val worldX = planeView.worldHalfWidth * (flipX * normX)
+        val worldZ = planeView.worldDepth * normZ
 
-            val worldX = planeView.worldHalfWidth * (flipX * normX)
-            val worldZ = planeView.worldDepth * normZ
+        // --- 1) Устойчивая «башня» пока магнит рядом ---
+        // Берём избыток над базой (только положительный), переводим в амплитуду за кадр.
+        val over = (mag - baseline).coerceAtLeast(0f)
+        if (over > 0f) {
+            // амплитуда подпитки за кадр — ограничена
+            val sustainAmp = (over * sustainK).coerceIn(0f, sustainAmpMax)
+            // чем сильнее поле — тем уже радиус (выше башня)
+            val sustainRadius = (sustainRadiusBase - over * 0.01f).coerceAtLeast(sustainRadiusMin)
+            planeView.addPulse(worldX, worldZ, sustainAmp, sustainRadius)
+        }
 
-            val d = kotlin.math.abs(delta)
+        // --- 2) (Опционально) одиночный «всплеск» при резком росте ---
+        if (abs(delta) > spikeThreshold) {
+            val d = abs(delta)
             val amp = (1.2f + d / 6f).coerceIn(1.2f, 4.0f)
-            val radius = (0.9f + d / 22f).coerceIn(0.9f, 1.8f)
-
+            val radius = (0.9f + d / 22f).coerceIn(0.8f, 1.8f)
             planeView.addPulse(worldX, worldZ, amp, radius)
         }
     }
